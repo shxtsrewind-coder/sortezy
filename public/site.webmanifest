@@ -1,0 +1,16 @@
+{
+  "name": "Sortezy — Daily Water Sort Puzzle",
+  "short_name": "Sortezy",
+  "description": "Pour the coloured water until every tube holds one colour. A new water sort puzzle every day, plus levels that get harder as you go.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0a08",
+  "theme_color": "#0b0a08",
+  "icons": [
+    { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/maskable-icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
