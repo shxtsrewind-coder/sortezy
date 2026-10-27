@@ -482,7 +482,7 @@ export const GamePage: React.FC = () => {
             key={m}
             type="button"
             onClick={() => setMode(m)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mode === m ? "bg-correct text-paper" : "text-muted hover:text-paper"}`}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mode === m ? "bg-correct text-white" : "text-muted hover:text-white"}`}
           >
             {m === "daily" ? "Daily" : "Levels"}
           </button>
@@ -528,7 +528,7 @@ export const GamePage: React.FC = () => {
             <button
               type="button"
               onClick={startDaily}
-              className="inline-flex items-center justify-center gap-2 w-full max-w-xs py-3 rounded-lg bg-correct hover:bg-correct-dim text-paper font-medium transition-colors"
+              className="inline-flex items-center justify-center gap-2 w-full max-w-xs py-3 rounded-lg bg-correct hover:bg-correct-dim text-white font-medium transition-colors"
             >
               <Play className="w-4 h-4" />
               Play — the clock starts now
@@ -608,7 +608,7 @@ export const GamePage: React.FC = () => {
                 You've finished the {FREE_LEVELS} free levels. Unlock hundreds more, up to 12 colours, with a one-time purchase.
               </p>
             </div>
-            <button type="button" onClick={handleUnlock} className="w-full py-2.5 px-4 rounded-md bg-correct hover:bg-correct-dim text-paper font-medium text-sm transition-colors">
+            <button type="button" onClick={handleUnlock} className="w-full py-2.5 px-4 rounded-md bg-correct hover:bg-correct-dim text-white font-medium text-sm transition-colors">
               Unlock all levels for $2
             </button>
           </section>
@@ -660,7 +660,7 @@ export const GamePage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => goToLevel(level + 1)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-correct hover:bg-correct-dim text-paper font-medium text-sm transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-correct hover:bg-correct-dim text-white font-medium text-sm transition-colors"
               >
                 Next level
                 <ChevronRight className="w-4 h-4" />
@@ -703,7 +703,7 @@ const LevelPicker: React.FC<{
   const reachable = highestCleared + 1;
   const shown = Math.max(FREE_LEVELS, Math.ceil((reachable + 5) / 5) * 5);
   return (
-    <div role="dialog" aria-modal="true" aria-label="All levels" className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="All levels" className="fixed inset-0 z-50 bg-white/75 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
       <div className="w-full max-w-md bg-surface border border-rule rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h2 className="font-display font-semibold text-lg">Levels</h2>
@@ -777,7 +777,7 @@ const DailyResult: React.FC<{
       <button
         type="button"
         onClick={onShare}
-        className="inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-correct hover:bg-correct-dim text-paper font-medium text-sm transition-colors"
+        className="inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-correct hover:bg-correct-dim text-white font-medium text-sm transition-colors"
       >
         {shareState === "copied" ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
         {shareState === "copied" ? "Copied — paste it anywhere" : shareState === "failed" ? "Couldn't copy — try again" : "Share result"}
