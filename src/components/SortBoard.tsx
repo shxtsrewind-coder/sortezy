@@ -25,12 +25,14 @@ interface Props {
   version: number;
   lastPour: { to: number; count: number } | null;
   hint: Move | null;
+  /** Units still hidden at the bottom of each tube (mystery puzzles). */
+  hidden?: number[];
   symbols: boolean;
   disabled: boolean;
   onPour: (move: Move) => void;
 }
 
-export const SortBoard: React.FC<Props> = ({ board, version, lastPour, hint, symbols, disabled, onPour }) => {
+export const SortBoard: React.FC<Props> = ({ board, version, lastPour, hint, hidden, symbols, disabled, onPour }) => {
   const [selected, setSelected] = useState<number | null>(null);
   const [shake, setShake] = useState<number | null>(null);
 
@@ -77,10 +79,11 @@ export const SortBoard: React.FC<Props> = ({ board, version, lastPour, hint, sym
         const isSel = selected === i;
         const isHintFrom = hint?.from === i;
         const isHintTo = hint?.to === i;
+        const veiled = hidden?.[i] ?? 0;
         const label =
           tube.length === 0
             ? `Tube ${i + 1}: empty`
-            : `Tube ${i + 1}: ${tube.map((c) => LIQUIDS[c].name).join(", ")} (top)${done ? ", complete" : ""}`;
+            : `Tube ${i + 1}: ${tube.map((c, k) => (k < veiled ? "hidden" : LIQUIDS[c].name)).join(", ")} (top)${done ? ", complete" : ""}`;
         return (
           <button
             key={i}
@@ -120,6 +123,22 @@ export const SortBoard: React.FC<Props> = ({ board, version, lastPour, hint, sym
               {tube.map((c, k) => {
                 const fresh = lastPour && lastPour.to === i && k >= tube.length - lastPour.count;
                 const isTop = k === tube.length - 1 || tube[k + 1] !== c;
+                if (k < veiled) {
+                  return (
+                    <span
+                      key={`${version}-${k}`}
+                      className="relative shrink-0 flex items-center justify-center text-[13px] font-semibold leading-none"
+                      style={{
+                        height: `${100 / CAPACITY}%`,
+                        background: "repeating-linear-gradient(135deg,#3a3633 0 6px,#2f2b28 6px 12px)",
+                        boxShadow: "inset 0 -1px 0 rgba(255,255,255,0.08)",
+                        color: "rgba(255,255,255,0.55)",
+                      }}
+                    >
+                      ?
+                    </span>
+                  );
+                }
                 return (
                   <span
                     key={`${version}-${k}`}

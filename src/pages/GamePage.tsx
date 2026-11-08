@@ -27,6 +27,8 @@ import { AchievementToastStack } from "../components/AchievementToast.tsx";
 import { AchievementsModal } from "../components/AchievementsModal.tsx";
 import {
   applyMove,
+  dailyUndoLimit,
+  hiddenCounts,
   getDailyPuzzle,
   getLevel,
   hintFor,
@@ -41,7 +43,7 @@ import {
   type Move,
   type Puzzle,
 } from "../lib/sort.ts";
-import { localSave, levelsCleared, type DailyProgress } from "../lib/localSave.ts";
+import { localSave, levelsCleared, dailyPours, type DailyProgress } from "../lib/localSave.ts";
 import { submitScore, ensureProfile } from "../lib/leaderboard.ts";
 import { supabase, ensureSession, currentUser, withTimeout, BOOT_STEP_MS } from "../lib/supabase.ts";
 import { useElapsed, formatTime, formatCountdown } from "../hooks/useTimer.ts";
@@ -104,6 +106,7 @@ function usePlay(puzzle: Puzzle, initialMoves: Move[] = []) {
   const [hint, setHint] = useState<Move | null>(null);
   const [stuck, setStuck] = useState(false);
   const board = useMemo(() => replay(puzzle.tubes, moves), [puzzle, moves]);
+  const hidden = useMemo(() => hiddenCounts(puzzle, moves), [puzzle, moves]);
 
   useEffect(() => {
     setMoves(initialMoves);
@@ -150,7 +153,7 @@ function usePlay(puzzle: Puzzle, initialMoves: Move[] = []) {
     setStuck(h === null && !isSolved(board));
     return h !== null;
   };
-  return { moves, board, version, lastPour, hint, stuck, pour, undo, restart, showHint, setMoves };
+  return { moves, board, hidden, version, lastPour, hint, stuck, pour, undo, restart, showHint, setMoves };
 }
 
 export const GamePage: React.FC = () => {
@@ -188,6 +191,9 @@ export const GamePage: React.FC = () => {
   const dailyRunning = !!progress && !dailyDone && phase === "ready";
   const dailyElapsed = useElapsed(progress?.startedAt ?? null, dailyRunning);
   const dailyTime = dailyDone ? (progress!.finishedMs as number) : dailyElapsed + (progress?.hints ?? 0) * HINT_PENALTY_MS;
+  const undoLimit = dailyUndoLimit(today);
+  const undosLeft = Math.max(0, undoLimit - (progress?.undos ?? 0));
+  const spent = progress?.spent ?? 0;
 
   const [level, setLevel] = useState(() => localSave.get().currentLevel);
   const levelPuzzle = useMemo(() => getLevel(level), [level]);
@@ -260,7 +266,7 @@ export const GamePage: React.FC = () => {
         if (s.daily && s.daily.date === todayUtc() && s.daily.finishedMs !== null) {
           submitScore({
             puzzleDate: s.daily.date,
-            moves: s.daily.moves.length,
+            moves: dailyPours(s.daily),
             hints: s.daily.hints,
             target: getDailyPuzzle(s.daily.date).target,
             timeMs: s.daily.finishedMs,
@@ -300,7 +306,7 @@ export const GamePage: React.FC = () => {
       supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
       const s = localSave.get();
       if (s.daily && s.daily.date === today && s.daily.finishedMs !== null) {
-        submitDaily(s.daily.moves.length, s.daily.hints, s.daily.finishedMs);
+        submitDaily(dailyPours(s.daily), s.daily.hints, s.daily.finishedMs);
       }
     },
     [today, submitDaily]
@@ -316,16 +322,26 @@ export const GamePage: React.FC = () => {
     setSave(localSave.updateDaily({ moves }));
     if (isSolved(replay(daily.tubes, moves))) {
       const timeMs = Math.max(1, Date.now() - progress.startedAt + progress.hints * HINT_PENALTY_MS);
-      const perfect = moves.length <= daily.target && progress.hints === 0;
+      const total = moves.length + spent;
+      const perfect = total <= daily.target && progress.hints === 0;
       const updated = unlockAchievements(localSave.recordDailyWin(today, timeMs, perfect));
       setSave(updated);
       setShowConfetti(true);
       setTimeout(() => setShowConfetti(false), 1800);
-      if (hasProfile) submitDaily(moves.length, progress.hints, timeMs);
+      if (hasProfile) submitDaily(total, progress.hints, timeMs);
     }
   };
-  const dailyUndo = () => setSave(localSave.updateDaily({ moves: dailyPlay.undo() }));
-  const dailyRestart = () => setSave(localSave.updateDaily({ moves: dailyPlay.restart() }));
+  // Undo is limited in the harder daily. Restart is always there so nobody gets stuck for good,
+  // but the pours it throws away still count, so it never improves a score.
+  const dailyUndo = () => {
+    if (!progress || undosLeft <= 0) return;
+    setSave(localSave.updateDaily({ moves: dailyPlay.undo(), undos: (progress.undos ?? 0) + 1 }));
+  };
+  const dailyRestart = () => {
+    if (!progress) return;
+    const thrown = dailyPlay.moves.length;
+    setSave(localSave.updateDaily({ moves: dailyPlay.restart(), spent: spent + thrown }));
+  };
   const dailyHint = () => {
     if (!progress) return;
     if (dailyPlay.showHint()) setSave(localSave.updateDaily({ hints: progress.hints + 1 }));
@@ -333,7 +349,7 @@ export const GamePage: React.FC = () => {
 
   const handleShare = async () => {
     if (!progress || progress.finishedMs === null) return;
-    const moves = progress.moves.length;
+    const moves = dailyPours(progress);
     const text = buildShareText({
       date: today,
       moves,
@@ -391,13 +407,13 @@ export const GamePage: React.FC = () => {
   const modalOpen = showAuth || showAchievements || showLevels;
   const btn = "flex items-center gap-1.5 px-3 py-2 rounded-md border border-rule bg-surface text-sm text-paper/90 hover:border-muted/60 transition-colors disabled:opacity-40";
 
-  const controls = (opts: { onUndo: () => void; onRestart: () => void; onHint: () => void; canUndo: boolean; hintLabel: string }) => (
+  const controls = (opts: { onUndo: () => void; onRestart: () => void; onHint: () => void; canUndo: boolean; canRestart?: boolean; undoLabel?: string; hintLabel: string }) => (
     <div className="flex flex-wrap items-center justify-center gap-2">
       <button type="button" onClick={opts.onUndo} disabled={!opts.canUndo} className={btn}>
         <Undo2 className="w-4 h-4" />
-        Undo
+        {opts.undoLabel ?? "Undo"}
       </button>
-      <button type="button" onClick={opts.onRestart} disabled={!opts.canUndo} className={btn}>
+      <button type="button" onClick={opts.onRestart} disabled={!(opts.canRestart ?? opts.canUndo)} className={btn}>
         <RotateCcw className="w-4 h-4" />
         Restart
       </button>
@@ -509,6 +525,7 @@ export const GamePage: React.FC = () => {
               <p className="text-sm text-muted">
                 {daily.colors} colours, {daily.tubes.length} tubes. Sort every colour into its own tube in{" "}
                 <span className="text-paper font-mono">{daily.target} pours</span> or fewer for three stars.
+                {daily.hidden && " Only the top colour of each tube shows: the rest are revealed as you pour."}
               </p>
             </div>
             <ul className="text-sm text-paper/80 space-y-2 text-left max-w-xs mx-auto">
@@ -522,7 +539,9 @@ export const GamePage: React.FC = () => {
               </li>
               <li className="flex items-start gap-2.5">
                 <Lightbulb className="w-4 h-4 mt-0.5 text-present shrink-0" />
-                Undo is free. A hint shows the best next pour but adds {HINT_PENALTY_MS / 1000} seconds.
+                {Number.isFinite(undoLimit)
+                  ? `You get ${undoLimit} undos. Restart is always there, but the pours it throws away still count. A hint shows the best next pour and adds ${HINT_PENALTY_MS / 1000} seconds.`
+                  : `Undo is free. A hint shows the best next pour but adds ${HINT_PENALTY_MS / 1000} seconds.`}
               </li>
             </ul>
             <button
@@ -540,7 +559,13 @@ export const GamePage: React.FC = () => {
         {mode === "daily" && progress && !dailyDone && (
           <>
             <p className="text-xs font-mono uppercase tracking-wide text-paper/80">
-              {dailyPlay.moves.length} pours <span className="text-faint">·</span> <span className="text-muted">target {daily.target}</span>
+              {dailyPlay.moves.length + spent} pours <span className="text-faint">·</span> <span className="text-muted">target {daily.target}</span>
+              {Number.isFinite(undoLimit) && (
+                <>
+                  {" "}
+                  <span className="text-faint">·</span> <span className={undosLeft ? "text-muted" : "text-present"}>{undosLeft} undo{undosLeft === 1 ? "" : "s"} left</span>
+                </>
+              )}
               {progress.hints > 0 && (
                 <>
                   {" "}
@@ -553,12 +578,21 @@ export const GamePage: React.FC = () => {
               version={dailyPlay.version}
               lastPour={dailyPlay.lastPour}
               hint={dailyPlay.hint}
+              hidden={dailyPlay.hidden}
               symbols={symbols}
               disabled={modalOpen}
               onPour={dailyPour}
             />
             {stuckNote(dailyPlay.stuck)}
-            {controls({ onUndo: dailyUndo, onRestart: dailyRestart, onHint: dailyHint, canUndo: dailyPlay.moves.length > 0, hintLabel: `Hint +${HINT_PENALTY_MS / 1000}s` })}
+            {controls({
+              onUndo: dailyUndo,
+              onRestart: dailyRestart,
+              onHint: dailyHint,
+              canUndo: dailyPlay.moves.length > 0 && undosLeft > 0,
+              canRestart: dailyPlay.moves.length > 0,
+              undoLabel: Number.isFinite(undoLimit) ? `Undo (${undosLeft})` : "Undo",
+              hintLabel: `Hint +${HINT_PENALTY_MS / 1000}s`,
+            })}
           </>
         )}
 
@@ -588,6 +622,7 @@ export const GamePage: React.FC = () => {
               </p>
               <p className="text-xs font-mono text-muted">
                 {levelPuzzle.colors} colours · target {levelPuzzle.target}
+                {levelPuzzle.hidden && <span className="text-present"> · mystery: colours hidden until uncovered</span>}
               </p>
             </div>
             <button type="button" onClick={() => setShowLevels(true)} className={`${btn} shrink-0 whitespace-nowrap`}>
@@ -622,6 +657,7 @@ export const GamePage: React.FC = () => {
               version={levelPlay.version}
               lastPour={levelPlay.lastPour}
               hint={levelPlay.hint}
+              hidden={levelPlay.hidden}
               symbols={symbols}
               disabled={modalOpen}
               onPour={levelPour}
@@ -755,7 +791,7 @@ const DailyResult: React.FC<{
     const id = setInterval(() => setCountdown(msUntilNextPuzzle()), 1000);
     return () => clearInterval(id);
   }, []);
-  const moves = progress.moves.length;
+  const moves = dailyPours(progress);
   // Hints cap the daily at two stars, so three stars always means unaided.
   const stars = progress.hints > 0 ? Math.min(2, starsFor(moves, puzzle.target)) : starsFor(moves, puzzle.target);
 

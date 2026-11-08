@@ -18,6 +18,8 @@ export interface Puzzle {
   tubes: Board;
   /** Moves the built-in solver needed — beat or match it for 3 stars. */
   target: number;
+  /** Mystery puzzle: only the top colour of each tube shows until it's uncovered. */
+  hidden: boolean;
 }
 
 // ---- Rules ---------------------------------------------------------------
@@ -205,22 +207,29 @@ function bestSolution(board: Board): Move[] | null {
 export function colorsForLevel(level: number): number {
   const steps = [
     [2, 3],
-    [5, 4],
-    [9, 5],
-    [14, 6],
-    [20, 7],
-    [30, 8],
-    [45, 9],
-    [65, 10],
-    [90, 11],
+    [4, 4],
+    [7, 5],
+    [11, 6],
+    [16, 7],
+    [22, 8],
+    [30, 9],
+    [45, 10],
+    [65, 11],
   ];
   for (const [upTo, colors] of steps) if (level <= upTo) return colors;
   return 12;
 }
 
-export const DAILY_COLORS = 9;
+export const DAILY_COLORS = 11;
 export const EMPTY_TUBES = 2;
 export const FREE_LEVELS = 20;
+/** The harder daily (11 colours, hidden colours, hardest of many shuffles) starts on this UTC day,
+ *  so a daily that's already being played never changes under anyone. */
+export const HARD_DAILY_FROM = "2026-11-09";
+/** Daily undos. Levels keep unlimited undo. */
+export const DAILY_UNDOS = 5;
+/** Levels from here on are mystery puzzles. */
+export const HIDDEN_FROM_LEVEL = 31;
 
 function deal(colors: number, rng: () => number): Board {
   const units: number[] = [];
@@ -245,22 +254,75 @@ function fairDeal(colors: number, rng: () => number): Board {
   }
 }
 
-function buildPuzzle(id: string, colors: number): Puzzle {
+/** How often a player making random sensible pours runs out of moves: a measure of how many
+ *  dead ends a shuffle hides. 0 = forgiving, 1 = almost every line of play gets stuck. */
+function stuckRate(board: Board, rng: () => number, runs = 60): number {
+  let stuck = 0;
+  for (let r = 0; r < runs; r++) {
+    let b = board;
+    const seen = new Set<string>([boardKey(b)]);
+    let steps = 0;
+    for (; steps < 300 && !isSolved(b); steps++) {
+      const options: Board[] = [];
+      for (const m of legalMoves(b)) {
+        if (isComplete(b[m.from])) continue;
+        const nb = applyMove(b, m);
+        if (!seen.has(boardKey(nb))) options.push(nb);
+      }
+      if (options.length === 0) break;
+      b = options[Math.floor(rng() * options.length)];
+      seen.add(boardKey(b));
+    }
+    if (!isSolved(b)) stuck++;
+  }
+  return stuck / runs;
+}
+
+interface BuildOpts {
+  /** Solvable shuffles to compare; the hardest one is kept. */
+  candidates: number;
+  hidden: boolean;
+}
+
+function buildPuzzle(id: string, colors: number, opts: BuildOpts = { candidates: 1, hidden: false }): Puzzle {
   const rng = makeRng(`sortezy:${id}`);
-  for (let attempt = 0; attempt < 50; attempt++) {
+  let best: { tubes: Board; target: number; score: number } | null = null;
+  let found = 0;
+  for (let attempt = 0; attempt < Math.max(50, opts.candidates * 8) && found < opts.candidates; attempt++) {
     const tubes = fairDeal(colors, rng);
     const sol = bestSolution(tubes);
-    if (sol) return { id, colors, tubes, target: sol.length };
+    if (!sol) continue;
+    found++;
+    // Harder = more dead ends for a player, then a longer best solution.
+    const score = opts.candidates > 1 ? stuckRate(tubes, rng) * 100 + sol.length : 0;
+    if (!best || score > best.score) best = { tubes, target: sol.length, score };
+  }
+  if (best) {
+    // The solver sees every colour; a mystery puzzle gets two pours of slack for what the player can't see yet.
+    return { id, colors, tubes: best.tubes, target: best.target + (opts.hidden ? 2 : 0), hidden: opts.hidden };
   }
   // Practically unreachable; a 3-colour puzzle is always solvable.
   return buildPuzzle(`${id}:fallback`, 3);
 }
 
+/** How many units at the bottom of each tube are still hidden after these pours. Hidden units
+ *  always sit at the bottom: a unit is uncovered for good once it has been the top of its tube. */
+export function hiddenCounts(puzzle: Puzzle, moves: Move[]): number[] {
+  if (!puzzle.hidden) return puzzle.tubes.map(() => 0);
+  let b = puzzle.tubes;
+  const h = b.map((t) => Math.max(0, t.length - 1));
+  for (const m of moves) {
+    b = applyMove(b, m);
+    for (let i = 0; i < b.length; i++) h[i] = Math.min(h[i], Math.max(0, b[i].length - 1));
+  }
+  return h;
+}
+
 const cache = new Map<string, Puzzle>();
-function cached(id: string, colors: number): Puzzle {
+function cached(id: string, colors: number, opts?: BuildOpts): Puzzle {
   let p = cache.get(id);
   if (!p) {
-    p = buildPuzzle(id, colors);
+    p = buildPuzzle(id, colors, opts);
     cache.set(id, p);
   }
   return p;
@@ -272,12 +334,19 @@ export function todayUtc(): string {
 
 /** The same puzzle for every player on a given UTC day. */
 export function getDailyPuzzle(date: string = todayUtc()): Puzzle {
-  return cached(`daily:${date}`, DAILY_COLORS);
+  if (date < HARD_DAILY_FROM) return cached(`daily:${date}`, 9);
+  return cached(`daily:${date}`, DAILY_COLORS, { candidates: 10, hidden: true });
+}
+
+/** Undos left in a daily, or Infinity before the harder daily began. */
+export function dailyUndoLimit(date: string): number {
+  return date < HARD_DAILY_FROM ? Infinity : DAILY_UNDOS;
 }
 
 /** Level N is the same for every player, so friends can compare. */
 export function getLevel(level: number): Puzzle {
-  return cached(`level:${level}`, colorsForLevel(level));
+  const candidates = level <= 10 ? 1 : level <= 30 ? 4 : 8;
+  return cached(`level:${level}`, colorsForLevel(level), { candidates, hidden: level >= HIDDEN_FROM_LEVEL });
 }
 
 /** Best next pour from where the player is now, or null if the position

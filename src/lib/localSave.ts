@@ -18,6 +18,15 @@ export interface DailyProgress {
   hints: number;
   /** Final time (penalties included) once the puzzle is solved. */
   finishedMs: number | null;
+  /** Undos used today (restart uses one too). Missing on older saves. */
+  undos?: number;
+  /** Pours thrown away by restarts. They still count toward the score. */
+  spent?: number;
+}
+
+/** A daily's score: every pour made, including any a restart threw away. */
+export function dailyPours(p: DailyProgress): number {
+  return p.moves.length + (p.spent ?? 0);
 }
 
 export interface SaveData {
@@ -82,7 +91,7 @@ export const localSave = {
 
   startDaily(date: string): SaveData {
     const data = read();
-    data.daily = { date, startedAt: Date.now(), moves: [], hints: 0, finishedMs: null };
+    data.daily = { date, startedAt: Date.now(), moves: [], hints: 0, finishedMs: null, undos: 0, spent: 0 };
     write(data);
     return data;
   },
